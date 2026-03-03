@@ -64,9 +64,74 @@ Go to Canvas and download `Abbas_2019_TableS4_ed1.csv` and `Abbas_2019_TableS4_e
 -   To visualize the relationship, barplot is **NOT** recommended.
 
 ```{r}
-### Your R code is here
-### XXXXX
+library(readr)
+library(dplyr)
+library(ggplot2)
+# AI for revising code and grammar of comments
 
+# ── 2. Read data ────────────────────────────────────────────────────────────
+ed1 <- read_csv("Abbas_2019_TableS4_ed1.csv", show_col_types = FALSE)
+ed2 <- read_csv("Abbas_2019_TableS4_ed2.csv", show_col_types = FALSE)
+
+# ── 3. Verify plot identifiers match ────────────────────────────────────────
+plots_ed1 <- ed1$PLOT
+plots_ed2 <- colnames(ed2)[-1]  # exclude tree_species column
+
+if (identical(sort(plots_ed1), sort(plots_ed2))) {
+  message("All ", length(plots_ed1), " plot codes match perfectly between the two files.")
+} else {
+  stop("Plot codes do NOT match – check file structure!")
+}
+
+# ── 4. Calculate total abundance per plot ───────────────────────────────────
+# Sum across all species (rows) for each plot (columns after the first)
+total_abund <- colSums(ed2[, -1, drop = FALSE])
+
+abund_df <- data.frame(
+  PLOT            = names(total_abund),
+  Total_Abundance = as.numeric(total_abund),
+  stringsAsFactors = FALSE
+)
+
+# ── 5. Combine with AGE_MEDIAN (and AGE_CATEGORY for optional coloring) ─────
+plot_data <- ed1 %>%
+  select(PLOT, AGE_MEDIAN, AGE_CATEGORY) %>%
+  left_join(abund_df, by = "PLOT") %>%
+  arrange(AGE_MEDIAN)   # nicer for visualization
+
+# Quick sanity check
+summary(plot_data$Total_Abundance)
+# Min ≈ 81, Median ≈ 263, Max ≈ 435
+
+# ── 6. Visualization: Scatter + smooth trend (preferred over boxplot) ───────
+ggplot(plot_data, aes(x = AGE_MEDIAN, y = Total_Abundance)) +
+  
+  # Points: semi-transparent, sized for visibility
+  geom_point(size = 3.3, alpha = 0.85, color = "#1f77b4", shape = 16) +
+  
+  # Smooth trend line + confidence band (loess is robust for small n=28)
+  geom_smooth(method = "loess", span = 0.75,   # slightly wider smooth
+              color = "#d62728", linewidth = 1.4, se = TRUE, alpha = 0.18) +
+  
+  # Labels & title
+  labs(
+    title    = "Total Abundance of Dominant Tree Species vs. Median Forest Age",
+    subtitle = "28 forest plots in Hong Kong – abundance = summed individuals of listed dominant species",
+    x        = "Median forest age (years)",
+    y        = "Total tree abundance (individuals)",
+    caption  = "Data source: Abbas (2019) supplementary tables"
+  ) +
+  
+  # Theme
+  theme_minimal(base_size = 14) +
+  theme(
+    plot.title      = element_text(face = "bold", hjust = 0.5, size = 15),
+    plot.subtitle   = element_text(hjust = 0.5, color = "grey40", size = 11),
+    axis.title      = element_text(face = "bold"),
+    panel.grid.major = element_line(color = "grey92"),
+    panel.grid.minor = element_blank(),
+    plot.caption    = element_text(hjust = 1, color = "grey50", size = 9)
+  )
 ```
 
 ### 2. Visualize the dominant tree species compositions using PCA and NMDS.
@@ -83,8 +148,34 @@ There are a number of points you should consider:
 After PCA, please visualize the result.
 
 ```{r}
-### Your R code is here
-### XXXXX
+# AI for revising code and grammar of comments
+species_data <- t(ed2[, -1])
+colnames(species_data) <- ed2$tree_species
+rownames(species_data) <- plots_ed2
+
+# Perform PCA with scaling (standardization)
+pca <- prcomp(species_data, scale. = TRUE)
+
+# Extract the first two principal components
+pca_scores <- as.data.frame(pca$x[, 1:2])
+pca_scores$PLOT <- rownames(pca_scores)
+
+# Merge with age category from ed1
+merged_pca <- merge(pca_scores, ed1[, c("PLOT", "AGE_CATEGORY")], by = "PLOT")
+
+# Visualize PCA with different colors for age groups
+ggplot(merged_pca, aes(x = PC1, y = PC2, color = AGE_CATEGORY)) +
+  geom_point(size = 4) +  # Points representing each plot
+  scale_color_manual(values = c("LT14" = "purple", "LT26" = "blue", "LT52" = "green", "LT70" = "orange", "GT70" = "red")) +  # Custom colors for age groups
+  labs(title = "PCA of Dominant Tree Species Composition",
+       x = "Principal Component 1",
+       y = "Principal Component 2",
+       color = "Age Category") +
+  theme_minimal() +  # Clean theme
+  theme(plot.title = element_text(hjust = 0.5, face = "bold"),  # Center and bold title
+        axis.title = element_text(face = "bold"),  # Bold axis labels
+        legend.position = "right",  # Legend on the right
+        legend.title = element_text(face = "bold"))  # Bold legend title
 
 ```
 
@@ -93,7 +184,36 @@ After PCA, please visualize the result.
 After NMDS, please visualize the result. You can use Bray-Curtis dissimilarity to calculate the dissimilarity among plots.
 
 ```{r}
-### Your R code is here
-### XXXXX
+# AI for revising code and grammar of comments
+library(vegan)
+
+# Use the species_data from above (plots as rows, species as columns)
+
+# Set seed for reproducibility
+set.seed(42)
+
+# Perform NMDS using Bray-Curtis dissimilarity
+nmds <- metaMDS(species_data, distance = "bray", k = 2, trymax = 100)  # k=2 for 2D, increase trymax if needed for convergence
+
+# Extract NMDS scores
+nmds_scores <- as.data.frame(scores(nmds, display = "sites"))
+nmds_scores$PLOT <- rownames(nmds_scores)
+
+# Merge with age category from ed1
+merged_nmds <- merge(nmds_scores, ed1[, c("PLOT", "AGE_CATEGORY")], by = "PLOT")
+
+# Visualize NMDS with different colors for age groups
+ggplot(merged_nmds, aes(x = NMDS1, y = NMDS2, color = AGE_CATEGORY)) +
+  geom_point(size = 4) +  # Points representing each plot
+  scale_color_manual(values = c("LT14" = "purple", "LT26" = "blue", "LT52" = "green", "LT70" = "orange", "GT70" = "red")) +  # Custom colors for age groups
+  labs(title = "NMDS of Dominant Tree Species Composition",
+       x = "NMDS Axis 1",
+       y = "NMDS Axis 2",
+       color = "Age Category") +
+  theme_minimal() +  # Clean theme
+  theme(plot.title = element_text(hjust = 0.5, face = "bold"),  # Center and bold title
+        axis.title = element_text(face = "bold"),  # Bold axis labels
+        legend.position = "right",  # Legend on the right
+        legend.title = element_text(face = "bold"))  # Bold legend title
 
 ```
